@@ -20,14 +20,14 @@ def get_leaderboard():
             func.count(GameRecord.id).label("runs"),
             func.max(GameRecord.played_at).label("last_played"),
         )
-        .join(GameRecord, GameRecord.user_id == User.id)
+        .outerjoin(GameRecord, GameRecord.user_id == User.id)
+        .filter(User.role != "admin")
         .group_by(User.id, User.username)
         .order_by(
             words_expression.desc(),
             func.count(GameRecord.id).desc(),
             User.username.asc(),
         )
-        .limit(10)
         .all()
     )
 
@@ -44,6 +44,15 @@ def get_leaderboard():
             }
         )
 
+    leaders = result[:10]
+    if not current_user.is_admin and not any(row["user_id"] == current_user.id for row in leaders):
+        current_user_row = next(
+            (row for row in result if row["user_id"] == current_user.id),
+            None,
+        )
+        if current_user_row:
+            leaders.append(current_user_row)
+
     current_user_words = (
         db.session.query(func.coalesce(func.sum(GameRecord.words_solved), 0))
         .filter(GameRecord.user_id == current_user.id)
@@ -57,7 +66,7 @@ def get_leaderboard():
 
     return jsonify(
         {
-            "leaders": result,
+            "leaders": leaders,
             "currentUser": {
                 "user_id": current_user.id,
                 "username": current_user.username,

@@ -204,15 +204,20 @@ const WORD_LENGTH = 5;
 const MATCH_ROUNDS = 3;
 const KEY_ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
 const STATUS_RANK = { absent: 1, present: 2, correct: 3 };
+const CONFETTI_COLORS = ["#3fa66d", "#d5a93d", "#6ca6df", "#df6258", "#edf2f7"];
 const SERVER_USER = window.WORDLE_USER || {
+  id: null,
   username: "Player",
   role: "player",
   isAdmin: false,
 };
 
 let lastAnswer = "";
+let confettiAnimation = 0;
+let confettiPieces = [];
 
 const dom = {
+  confettiLayer: document.querySelector("#confettiLayer"),
   appShell: document.querySelector("#appShell"),
   sessionRole: document.querySelector("#sessionRole"),
   headline: document.querySelector("#headline"),
@@ -268,6 +273,7 @@ const dom = {
 
 const state = {
   auth: {
+    id: SERVER_USER.id,
     username: SERVER_USER.username,
     role: SERVER_USER.role,
     isAdmin: Boolean(SERVER_USER.isAdmin),
@@ -360,6 +366,7 @@ function updateSessionUi() {
 
 function syncCurrentUser(currentUser) {
   if (!currentUser) return;
+  state.auth.id = currentUser.user_id || state.auth.id;
   state.auth.username = currentUser.username || state.auth.username;
   if (Object.hasOwn(currentUser, "words")) {
     state.userWords = currentUser.words || 0;
@@ -588,8 +595,95 @@ function mergeKeyState(keys, guess, result) {
   });
 }
 
+function launchConfetti({ bursts = 1, originX = 0.5, intensity = 1 } = {}) {
+  if (!dom.confettiLayer || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  const canvas = dom.confettiLayer;
+  const context = canvas.getContext("2d");
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  canvas.width = Math.floor(width * pixelRatio);
+  canvas.height = Math.floor(height * pixelRatio);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+  for (let burst = 0; burst < bursts; burst += 1) {
+    const count = Math.round(70 * intensity);
+    const startX = width * (originX + (Math.random() - 0.5) * 0.18);
+    const startY = height * (0.18 + Math.random() * 0.16);
+
+    for (let index = 0; index < count; index += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 4 + Math.random() * 7 * intensity;
+      confettiPieces.push({
+        x: startX,
+        y: startY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 4,
+        size: 5 + Math.random() * 7,
+        rotation: Math.random() * Math.PI,
+        spin: (Math.random() - 0.5) * 0.3,
+        color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+        life: 80 + Math.random() * 45,
+      });
+    }
+  }
+
+  if (!confettiAnimation) {
+    confettiAnimation = window.requestAnimationFrame(drawConfetti);
+  }
+}
+
+function drawConfetti() {
+  const canvas = dom.confettiLayer;
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) return;
+
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  context.clearRect(0, 0, width, height);
+
+  confettiPieces = confettiPieces.filter((piece) => {
+    piece.x += piece.vx;
+    piece.y += piece.vy;
+    piece.vy += 0.18;
+    piece.vx *= 0.985;
+    piece.rotation += piece.spin;
+    piece.life -= 1;
+
+    context.save();
+    context.translate(piece.x, piece.y);
+    context.rotate(piece.rotation);
+    context.globalAlpha = Math.max(0, Math.min(1, piece.life / 35));
+    context.fillStyle = piece.color;
+    context.fillRect(-piece.size / 2, -piece.size / 4, piece.size, piece.size / 2);
+    context.restore();
+
+    return piece.life > 0 && piece.y < height + 40;
+  });
+
+  if (confettiPieces.length) {
+    confettiAnimation = window.requestAnimationFrame(drawConfetti);
+  } else {
+    confettiAnimation = 0;
+    context.clearRect(0, 0, width, height);
+  }
+}
+
 function renderBoard(container, guesses, current, answer) {
-  const fragment = document.createDocumentFragment();
+  const totalCells = MAX_GUESSES * WORD_LENGTH;
+  if (container.children.length !== totalCells) {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < totalCells; index += 1) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      fragment.append(cell);
+    }
+    container.replaceChildren(fragment);
+  }
 
   for (let row = 0; row < MAX_GUESSES; row += 1) {
     const submitted = guesses[row];
@@ -598,8 +692,14 @@ function renderBoard(container, guesses, current, answer) {
     const result = submitted ? evaluateGuess(submitted, answer) : [];
 
     for (let column = 0; column < WORD_LENGTH; column += 1) {
-      const cell = document.createElement("div");
-      cell.className = "cell";
+      const cell = container.children[row * WORD_LENGTH + column];
+      cell.textContent = "";
+      cell.style.removeProperty("--reveal-delay");
+      cell.classList.remove("filled", "correct", "present", "absent");
+      if (!submitted) {
+        cell.classList.remove("revealed");
+      }
+
       const letter = letters[column].trim();
       if (letter) {
         cell.textContent = letter;
@@ -607,12 +707,13 @@ function renderBoard(container, guesses, current, answer) {
       }
       if (submitted) {
         cell.classList.add(result[column]);
+        if (!cell.classList.contains("revealed")) {
+          cell.classList.add("revealed");
+        }
+        cell.style.setProperty("--reveal-delay", `${column * 90}ms`);
       }
-      fragment.append(cell);
     }
   }
-
-  container.replaceChildren(fragment);
 }
 
 function renderKeyboard(container, keys) {
@@ -743,11 +844,9 @@ function getMultiStatus() {
 
 function createRoundLogItem(item) {
   const li = document.createElement("li");
-  const p1 = formatTurnSummary(item.p1);
-  const p2 = formatTurnSummary(item.p2);
   li.textContent = item.winner == null
-    ? `Round ${item.round}: no point (${item.word})`
-    : `Round ${item.round}: ${state.multi.names[item.winner]} won (${p1} vs ${p2})`;
+    ? `Round ${item.round} no point`
+    : `Round ${item.round} ${state.multi.names[item.winner]} won`;
   return li;
 }
 
@@ -793,6 +892,7 @@ function renderStreakRows(rows) {
   if (!rows.length) return [emptyRow(3, "No words yet")];
   return rows.map((row, index) => {
     const tr = document.createElement("tr");
+    tr.classList.toggle("current-player", row.user_id === state.auth.id);
     tr.innerHTML = `
       <td>${row.rank || index + 1}</td>
       <td>${escapeHtml(row.username)}</td>
@@ -914,6 +1014,7 @@ function submitStreakGuess() {
     game.locked = true;
     recordSingleplayerCorrect(game.answer);
     render();
+    launchConfetti({ bursts: 1, intensity: 1 });
     window.setTimeout(nextStreakWord, 850);
     return;
   }
@@ -1086,6 +1187,9 @@ function finalizeRound() {
     match.phase = "match";
     match.status = "Match";
     match.pending = "start";
+    if (getMatchWinner() != null) {
+      launchConfetti({ bursts: 2, intensity: 1.25 });
+    }
   } else {
     match.phase = "result";
     match.status = winner == null ? "No point" : "Round";
