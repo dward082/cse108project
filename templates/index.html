@@ -136,11 +136,11 @@
             </div>
 
             <label class="field">
-              <span>Player 1</span>
+              <span>You</span>
               <input id="playerOneName" type="text" maxlength="18" autocomplete="off" />
             </label>
             <label class="field">
-              <span>Player 2</span>
+              <span>Room Code</span>
               <input id="playerTwoName" type="text" maxlength="18" autocomplete="off" />
             </label>
 
@@ -149,7 +149,10 @@
                 <path d="M5 12h14" />
                 <path d="m13 6 6 6-6 6" />
               </svg>
-              <span>Start Match</span>
+              <span>Create / Join</span>
+            </button>
+            <button class="danger-action leave-action" id="leaveChallenge" type="button" hidden>
+              Leave
             </button>
 
             <div class="match-box" aria-label="Match score">
@@ -176,7 +179,16 @@
             </div>
 
             <div class="board-stage">
-              <div class="board" id="multiBoard" aria-label="Challenge board"></div>
+              <div class="live-boards">
+                <section class="live-board-panel" aria-labelledby="yourBoardLabel">
+                  <span class="eyebrow" id="yourBoardLabel">You</span>
+                  <div class="board" id="multiBoard" aria-label="Your challenge board"></div>
+                </section>
+                <section class="live-board-panel" aria-labelledby="rivalBoardLabel">
+                  <span class="eyebrow" id="rivalBoardLabel">Rival</span>
+                  <div class="board masked-board" id="opponentBoard" aria-label="Rival challenge board"></div>
+                </section>
+              </div>
               <div class="cover is-visible" id="multiCover">
                 <h3 id="coverTitle">Challenge</h3>
                 <p id="coverText">Ready when you are.</p>
@@ -317,6 +329,7 @@
         "isAdmin": user.is_admin
       } | tojson }};
     </script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
   </body>
 </html>

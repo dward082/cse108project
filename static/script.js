@@ -213,6 +213,8 @@ const SERVER_USER = window.WORDLE_USER || {
 };
 
 let lastAnswer = "";
+let socket = null;
+let livePlayerIndex = null;
 let confettiAnimation = 0;
 let confettiPieces = [];
 
@@ -246,6 +248,7 @@ const dom = {
   playerOneName: document.querySelector("#playerOneName"),
   playerTwoName: document.querySelector("#playerTwoName"),
   startChallenge: document.querySelector("#startChallenge"),
+  leaveChallenge: document.querySelector("#leaveChallenge"),
   p1Label: document.querySelector("#p1Label"),
   p2Label: document.querySelector("#p2Label"),
   p1Score: document.querySelector("#p1Score"),
@@ -255,6 +258,7 @@ const dom = {
   multiPrompt: document.querySelector("#multiPrompt"),
   multiStatus: document.querySelector("#multiStatus"),
   multiBoard: document.querySelector("#multiBoard"),
+  opponentBoard: document.querySelector("#opponentBoard"),
   multiKeyboard: document.querySelector("#multiKeyboard"),
   multiCover: document.querySelector("#multiCover"),
   coverTitle: document.querySelector("#coverTitle"),
@@ -303,16 +307,18 @@ function createStreakState() {
 
 function createMultiState() {
   return {
-    phase: "setup",
+    code: "",
+    phase: "lobby",
+    players: [],
     names: ["Player 1", "Player 2"],
     scores: [0, 0],
     round: 1,
-    active: 0,
-    answer: pickAnswer(),
     turns: [createTurn(), createTurn()],
     history: [],
-    status: "Idle",
+    status: "Create or join a room",
     pending: "start",
+    current: "",
+    connected: false,
   };
 }
 
@@ -350,13 +356,9 @@ function applyUserDefaults() {
   const name = fallback;
   dom.playerName.value = name;
   dom.accountUsername.value = state.auth.username;
-  if (state.auth.isAdmin) {
-    dom.playerOneName.value = "player1";
-    dom.playerTwoName.value = "player2";
-  } else {
-    dom.playerOneName.value = state.auth.username === "player2" ? "player1" : state.auth.username;
-    dom.playerTwoName.value = state.auth.username === "player2" ? state.auth.username : "player2";
-  }
+  dom.playerOneName.value = state.auth.username;
+  dom.playerOneName.readOnly = true;
+  dom.playerTwoName.placeholder = "Leave blank to create";
 }
 
 function updateSessionUi() {
@@ -443,8 +445,7 @@ async function saveProfileUsername() {
       body: JSON.stringify({ username }),
     });
     syncCurrentUser(payload.currentUser);
-    dom.playerOneName.value = state.auth.username === "player2" ? "player1" : state.auth.username;
-    dom.playerTwoName.value = state.auth.username === "player2" ? state.auth.username : "player2";
+    dom.playerOneName.value = state.auth.username;
     localStorage.setItem(STORAGE_KEYS.player, state.auth.username);
     dom.playerMessage.textContent = payload.message;
     await loadLeaderboard();
@@ -673,7 +674,8 @@ function drawConfetti() {
   }
 }
 
-function renderBoard(container, guesses, current, answer) {
+function renderBoard(container, guesses, current, answer, options = {}) {
+  const hideLetters = Boolean(options.hideLetters);
   const totalCells = MAX_GUESSES * WORD_LENGTH;
   if (container.children.length !== totalCells) {
     const fragment = document.createDocumentFragment();
@@ -687,9 +689,11 @@ function renderBoard(container, guesses, current, answer) {
 
   for (let row = 0; row < MAX_GUESSES; row += 1) {
     const submitted = guesses[row];
+    const submittedWord = typeof submitted === "string" ? submitted : submitted?.word;
+    const submittedResult = typeof submitted === "string" ? null : submitted?.result;
     const draft = row === guesses.length ? current : "";
-    const letters = (submitted || draft).padEnd(WORD_LENGTH, " ").split("");
-    const result = submitted ? evaluateGuess(submitted, answer) : [];
+    const letters = (submittedWord || draft).padEnd(WORD_LENGTH, " ").split("");
+    const result = submittedWord ? submittedResult || evaluateGuess(submittedWord, answer) : [];
 
     for (let column = 0; column < WORD_LENGTH; column += 1) {
       const cell = container.children[row * WORD_LENGTH + column];
@@ -702,10 +706,10 @@ function renderBoard(container, guesses, current, answer) {
 
       const letter = letters[column].trim();
       if (letter) {
-        cell.textContent = letter;
+        cell.textContent = hideLetters ? "" : letter;
         cell.classList.add("filled");
       }
-      if (submitted) {
+      if (submittedWord) {
         cell.classList.add(result[column]);
         if (!cell.classList.contains("revealed")) {
           cell.classList.add("revealed");
@@ -810,36 +814,48 @@ function renderStreak() {
 
 function renderMulti() {
   const match = state.multi;
-  const activeTurn = match.turns[match.active];
-  const activeName = match.names[match.active];
+  const ownIndex = livePlayerIndex ?? 0;
+  const opponentIndex = ownIndex === 0 ? 1 : 0;
+  const ownTurn = match.turns[ownIndex] || createTurn();
+  const opponentTurn = match.turns[opponentIndex] || createTurn();
 
   dom.p1Label.textContent = match.names[0];
   dom.p2Label.textContent = match.names[1];
   dom.p1Score.textContent = match.scores[0];
   dom.p2Score.textContent = match.scores[1];
+  dom.leaveChallenge.hidden = !match.connected && match.status !== "Connecting";
   dom.multiRound.textContent = `Round ${match.round}`;
   dom.multiPrompt.textContent =
-    match.phase === "turn" ? `${activeName}'s word` : "Challenge board";
+    match.phase === "playing" ? "Your board" : "challenge";
   dom.multiStatus.textContent = getMultiStatus();
   dom.roundLog.replaceChildren(...match.history.map(createRoundLogItem));
 
-  const shouldShowBoard = match.phase === "turn";
+  const shouldShowBoard = match.phase === "playing";
   renderBoard(
     dom.multiBoard,
-    shouldShowBoard ? activeTurn.guesses : [],
-    shouldShowBoard ? activeTurn.current : "",
-    match.answer,
+    shouldShowBoard ? ownTurn.guesses : [],
+    shouldShowBoard ? match.current : "",
+    "",
   );
-  renderKeyboard(dom.multiKeyboard, shouldShowBoard ? activeTurn.keys : {});
+  renderBoard(
+    dom.opponentBoard,
+    shouldShowBoard ? opponentTurn.guesses : [],
+    "",
+    "",
+    { hideLetters: true },
+  );
+  renderKeyboard(dom.multiKeyboard, shouldShowBoard ? ownTurn.keys : {});
   renderCover();
 }
 
 function getMultiStatus() {
   const match = state.multi;
-  if (match.phase !== "turn") return match.status;
-  const turn = match.turns[match.active];
-  const elapsed = Math.max(0, Math.floor((Date.now() - turn.start) / 1000));
-  return `${elapsed}s`;
+  if (match.phase !== "playing") return match.status;
+  const ownIndex = livePlayerIndex ?? 0;
+  const ownTurn = match.turns[ownIndex] || createTurn();
+  const opponentIndex = ownIndex === 0 ? 1 : 0;
+  const opponentTurn = match.turns[opponentIndex] || createTurn();
+  return `You ${ownTurn.guesses.length}/6 | Rival ${opponentTurn.guesses.length}/6`;
 }
 
 function createRoundLogItem(item) {
@@ -857,18 +873,22 @@ function formatTurnSummary(turn) {
 
 function renderCover() {
   const match = state.multi;
-  const visible = match.phase !== "turn";
+  const visible = match.phase !== "playing";
   dom.multiCover.classList.toggle("is-visible", visible);
   if (!visible) return;
 
-  if (match.phase === "setup") {
+  dom.coverAction.hidden = false;
+  dom.coverAction.disabled = false;
+  if (!match.connected) {
     dom.coverTitle.textContent = "Challenge";
-    dom.coverText.textContent = "Start the 3-round match.";
-    dom.coverActionText.textContent = "Start Match";
-  } else if (match.phase === "ready") {
-    dom.coverTitle.textContent = `${match.names[match.active]} is up`;
-    dom.coverText.textContent = `Round ${match.round}`;
-    dom.coverActionText.textContent = "Ready";
+    dom.coverText.textContent = "create a room or enter a room code.";
+    dom.coverActionText.textContent = "Create / Join";
+  } else if (match.phase === "lobby") {
+    dom.coverTitle.textContent = match.code ? `Room ${match.code}` : "Lobby";
+    dom.coverText.textContent =
+      match.players.length < 2 ? "Share this code with player 2." : "Both players are ready.";
+    dom.coverActionText.textContent = match.players.length < 2 ? "Waiting" : "Start Match";
+    dom.coverAction.disabled = match.players.length < 2;
   } else if (match.phase === "result") {
     const last = match.history[match.history.length - 1];
     dom.coverTitle.textContent = last.winner == null ? "No point" : `${match.names[last.winner]} wins`;
@@ -880,6 +900,10 @@ function renderCover() {
       winner == null ? "Match tied" : `${match.names[winner]} wins the match`;
     dom.coverText.textContent = `${match.scores[0]}-${match.scores[1]}`;
     dom.coverActionText.textContent = "Rematch";
+  }
+
+  if (match.phase !== "lobby") {
+    dom.coverAction.disabled = false;
   }
 }
 
@@ -1071,43 +1095,39 @@ async function recordSingleplayerCorrect(answer) {
 }
 
 function startChallenge() {
-  const p1 = cleanName(dom.playerOneName.value, "Player 1");
-  const p2 = cleanName(dom.playerTwoName.value, "Player 2");
-  dom.playerOneName.value = p1;
-  dom.playerTwoName.value = p2;
-  lastAnswer = state.multi.answer;
-  state.multi = createMultiState();
-  state.multi.names = [p1, p2];
-  state.multi.phase = "ready";
-  state.multi.status = "Ready";
-  prepareMultiRound(false);
+  ensureSocket();
+  const roomCode = dom.playerTwoName.value.trim().toUpperCase();
+  state.multi.status = "Connecting";
+  state.multi.connected = true;
+  socket.emit("join_match", { roomCode });
   render();
 }
 
-function prepareMultiRound(advanceRound) {
-  const match = state.multi;
-  if (advanceRound) match.round += 1;
-  lastAnswer = match.answer;
-  match.answer = pickAnswer();
-  match.active = 0;
-  match.turns = [createTurn(), createTurn()];
-  match.phase = "ready";
-  match.status = "Ready";
-  match.pending = "next";
+function leaveChallenge() {
+  if (socket?.connected) {
+    socket.emit("leave_match");
+    socket.disconnect();
+  }
+  socket = null;
+  livePlayerIndex = null;
+  state.multi = createMultiState();
+  dom.playerTwoName.value = "";
+  dom.startChallenge.querySelector("span").textContent = "Create / Join";
+  render();
 }
 
 function handleMultiInput(key) {
   const match = state.multi;
-  if (match.phase !== "turn") return;
-  const turn = match.turns[match.active];
-  if (turn.locked) return;
+  if (match.phase !== "playing") return;
+  const turn = match.turns[livePlayerIndex ?? 0] || createTurn();
+  if (turn.finished) return;
 
   if (key === "BACKSPACE") {
-    turn.current = turn.current.slice(0, -1);
+    match.current = match.current.slice(0, -1);
   } else if (key === "ENTER") {
     submitMultiGuess();
-  } else if (/^[A-Z]$/.test(key) && turn.current.length < WORD_LENGTH) {
-    turn.current += key;
+  } else if (/^[A-Z]$/.test(key) && match.current.length < WORD_LENGTH) {
+    match.current += key;
   }
 
   render();
@@ -1115,108 +1135,15 @@ function handleMultiInput(key) {
 
 function submitMultiGuess() {
   const match = state.multi;
-  const turn = match.turns[match.active];
-  if (turn.current.length !== WORD_LENGTH) {
+  if (match.current.length !== WORD_LENGTH) {
     match.status = "Five letters";
+    render();
     return;
   }
 
-  const guess = turn.current;
-  const result = evaluateGuess(guess, match.answer);
-  turn.guesses.push(guess);
-  turn.current = "";
-  mergeKeyState(turn.keys, guess, result);
-
-  if (guess === match.answer) {
-    match.status = "Correct";
-    turn.locked = true;
-    recordMultiplayerCorrect(match.active, match.answer);
-    render();
-    window.setTimeout(() => finishTurn(true), 850);
-    return;
-  }
-
-  if (turn.guesses.length >= MAX_GUESSES) {
-    match.status = "Missed";
-    turn.locked = true;
-    render();
-    window.setTimeout(() => finishTurn(false), 850);
-  } else {
-    match.status = "Try again";
-  }
-}
-
-function finishTurn(solved) {
-  const match = state.multi;
-  const turn = match.turns[match.active];
-  turn.solved = solved;
-  turn.finished = true;
-  turn.seconds = Math.max(1, Math.ceil((Date.now() - turn.start) / 1000));
-
-  if (solved) {
-    finalizeRound();
-  } else if (match.active === 0) {
-    match.active = 1;
-    match.phase = "ready";
-    match.status = "Pass";
-  } else {
-    finalizeRound();
-  }
+  socket.emit("submit_guess", { guess: match.current });
+  match.current = "";
   render();
-}
-
-function finalizeRound() {
-  const match = state.multi;
-  const p1 = summarizeTurn(match.turns[0]);
-  const p2 = summarizeTurn(match.turns[1]);
-  const winner = compareTurns(p1, p2);
-
-  if (winner != null) {
-    match.scores[winner] += 1;
-  }
-
-  match.history.push({
-    round: match.round,
-    word: match.answer,
-    p1,
-    p2,
-    winner,
-  });
-
-  if (match.round >= MATCH_ROUNDS) {
-    match.phase = "match";
-    match.status = "Match";
-    match.pending = "start";
-    if (getMatchWinner() != null) {
-      launchConfetti({ bursts: 2, intensity: 1.25 });
-    }
-  } else {
-    match.phase = "result";
-    match.status = winner == null ? "No point" : "Round";
-    match.pending = "next";
-  }
-}
-
-async function recordMultiplayerCorrect(playerIndex, answer) {
-  const match = state.multi;
-  const turn = match.turns[playerIndex];
-  if (turn.saved) return;
-  turn.saved = true;
-
-  try {
-    await appRequest("/api/multiplayer-records", {
-      method: "POST",
-      body: JSON.stringify({
-        username: match.names[playerIndex],
-        score: 1,
-        solvedWord: answer,
-      }),
-    });
-    await loadLeaderboard();
-  } catch (error) {
-    match.status = "Correct not saved";
-    render();
-  }
 }
 
 function getMatchWinner() {
@@ -1244,28 +1171,85 @@ function compareTurns(p1, p2) {
 }
 
 function beginMultiTurn() {
-  const match = state.multi;
-  const turn = match.turns[match.active];
-  turn.start = Date.now();
-  turn.current = "";
-  turn.locked = false;
-  match.phase = "turn";
-  match.status = "0s";
-  render();
+  ensureSocket();
+  socket.emit("start_match");
 }
 
 function handleCoverAction() {
   const match = state.multi;
-  if (match.phase === "setup") {
+  if (!match.connected) {
     startChallenge();
-  } else if (match.phase === "ready") {
+  } else if (match.phase === "lobby") {
     beginMultiTurn();
   } else if (match.phase === "result") {
-    prepareMultiRound(match.pending === "next");
-    render();
+    socket.emit("next_round");
   } else if (match.phase === "match") {
-    startChallenge();
+    socket.emit("next_round");
   }
+}
+
+function ensureSocket() {
+  if (socket) return;
+  socket = io({
+    transports: ["websocket", "polling"],
+  });
+
+  socket.on("connect", () => {
+    state.multi.status = "Connected";
+    render();
+  });
+
+  socket.on("disconnect", () => {
+    state.multi.connected = false;
+    if (state.screen === "multiplayer") {
+      state.multi.status = "Disconnected";
+    }
+    render();
+  });
+
+  socket.on("joined_match", (payload) => {
+    livePlayerIndex = payload.playerIndex;
+    state.multi.code = payload.roomCode;
+    state.multi.connected = true;
+    dom.playerTwoName.value = payload.roomCode;
+    dom.startChallenge.querySelector("span").textContent = "Rejoin Room";
+    render();
+  });
+
+  socket.on("match_state", (payload) => {
+    applyLiveMatchState(payload);
+    render();
+    if (payload.phase === "result") {
+      loadLeaderboard();
+    }
+    if (payload.phase === "match" && getMatchWinner() === livePlayerIndex) {
+      launchConfetti({ bursts: 2, intensity: 1.2 });
+    }
+  });
+
+  socket.on("match_error", (payload) => {
+    state.multi.status = payload.message || "Match error";
+    state.multi.connected = Boolean(socket?.connected);
+    render();
+  });
+}
+
+function applyLiveMatchState(payload) {
+  const names = ["Waiting", "Waiting"];
+  (payload.players || []).forEach((player, index) => {
+    names[index] = player.username;
+  });
+
+  state.multi.code = payload.code || state.multi.code;
+  state.multi.connected = true;
+  state.multi.players = payload.players || [];
+  state.multi.names = names;
+  state.multi.scores = payload.scores || [0, 0];
+  state.multi.round = payload.round || 1;
+  state.multi.phase = payload.phase || "lobby";
+  state.multi.turns = payload.turns || [createTurn(), createTurn()];
+  state.multi.history = payload.history || [];
+  state.multi.status = payload.status || "Ready";
 }
 
 function wireEvents() {
@@ -1290,6 +1274,7 @@ function wireEvents() {
 
   dom.restartStreak.addEventListener("click", restartStreak);
   dom.startChallenge.addEventListener("click", startChallenge);
+  dom.leaveChallenge.addEventListener("click", leaveChallenge);
   dom.coverAction.addEventListener("click", handleCoverAction);
 
   dom.playerName.addEventListener("change", () => {
@@ -1315,7 +1300,7 @@ function boot() {
   loadAdminPlayers();
   loadLeaderboard();
   window.setInterval(() => {
-    if (state.multi.phase === "turn") {
+    if (state.multi.phase === "playing") {
       dom.multiStatus.textContent = getMultiStatus();
     }
   }, 500);

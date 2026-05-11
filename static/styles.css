@@ -285,6 +285,11 @@ button {
   color: #fff;
 }
 
+.leave-action {
+  width: 100%;
+  min-height: 42px;
+}
+
 .summary-strip {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -527,7 +532,22 @@ button {
   position: relative;
   display: grid;
   place-items: center;
-  width: min(100%, 390px);
+  width: min(100%, 760px);
+}
+
+.live-boards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  width: 100%;
+  align-items: start;
+}
+
+.live-board-panel {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  min-width: 0;
 }
 
 .board {
@@ -536,6 +556,10 @@ button {
   grid-auto-rows: 58px;
   gap: 7px;
   width: min(100%, 340px);
+}
+
+.masked-board .cell {
+  color: transparent;
 }
 
 .cell {
@@ -810,6 +834,10 @@ td {
 
   .play-surface {
     min-height: 560px;
+  }
+
+  .live-boards {
+    grid-template-columns: 1fr;
   }
 }
 

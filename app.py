@@ -8,18 +8,21 @@ from auth import auth
 from leaderboard import leaderboard
 from main import main
 from models import User, db
+from multiplayer import socketio
 
 
 def create_app():
     app = Flask(__name__)
+    database_url = os.environ.get("DATABASE_URL", "sqlite:///word_run.db")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-this-secret")
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-        "DATABASE_URL",
-        "sqlite:///word_run.db",
-    )
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     db.init_app(app)
+    socketio.init_app(app)
 
     login_manager = LoginManager()
     login_manager.login_view = "auth.login"
@@ -65,4 +68,10 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(debug=os.environ.get("FLASK_DEBUG") == "1")
+    socketio.run(
+        app,
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        allow_unsafe_werkzeug=True,
+    )
