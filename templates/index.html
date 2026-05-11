@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wordle</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="app-shell" id="appShell">
+      <header class="topbar">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+            <rect x="8" y="8" width="16" height="16" rx="3" />
+            <rect x="28" y="8" width="16" height="16" rx="3" />
+            <rect x="48" y="8" width="8" height="16" rx="3" />
+            <rect x="8" y="28" width="16" height="16" rx="3" />
+            <rect x="28" y="28" width="16" height="16" rx="3" />
+            <rect x="48" y="28" width="8" height="16" rx="3" />
+            <rect x="8" y="48" width="16" height="8" rx="3" />
+            <rect x="28" y="48" width="16" height="8" rx="3" />
+            <rect x="48" y="48" width="8" height="8" rx="3" />
+          </svg>
+          <div>
+            <h1>Wordle</h1>
+            <p id="headline">{{ '' if user.is_admin else 'Play singleplayer Wordle.' }}</p>
+          </div>
+        </div>
+
+        <div class="top-actions">
+          <nav class="tabs" aria-label="Game sections">
+            <button class="tab{% if not user.is_admin %} is-active{% endif %}" type="button" data-screen="streak" aria-selected="{{ 'false' if user.is_admin else 'true' }}" {% if user.is_admin %}hidden{% endif %}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 17h16M7 13l3-3 3 2 4-5" />
+                <path d="M17 7h3v3" />
+              </svg>
+              <span>Single</span>
+            </button>
+            <button class="tab" type="button" data-screen="multiplayer" aria-selected="false" {% if user.is_admin %}hidden{% endif %}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                <path d="M16 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                <path d="M2 21a6 6 0 0 1 12 0" />
+                <path d="M14 20a5 5 0 0 1 8 1" />
+              </svg>
+              <span>Challenge</span>
+            </button>
+            <button class="tab" type="button" data-screen="profile" aria-selected="false" {% if user.is_admin %}hidden{% endif %}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                <path d="M4 21a8 8 0 0 1 16 0" />
+                <path d="M16 15h4" />
+                <path d="M18 13v4" />
+              </svg>
+              <span>Player</span>
+            </button>
+            <button class="tab{% if user.is_admin %} is-active{% endif %}" type="button" data-screen="leaderboard" aria-selected="{{ 'true' if user.is_admin else 'false' }}">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 21V9M16 21V5M4 21h16M6 9h4M14 5h4" />
+              </svg>
+              <span>Leaderboard</span>
+            </button>
+          </nav>
+
+          <div class="session-chip">
+            <span id="sessionRole">{{ 'Admin' if user.is_admin else user.username }}</span>
+            <a class="text-action" id="logoutButton" href="{{ url_for('auth.logout') }}">Log out</a>
+          </div>
+        </div>
+      </header>
+
+      <section class="summary-strip" aria-label="Score summary" {% if user.is_admin %}hidden{% endif %}>
+        <div class="summary-item">
+          <span>Current Streak</span>
+          <strong id="summaryCurrent">0</strong>
+        </div>
+        <div class="summary-item">
+          <span>High Score</span>
+          <strong id="summaryBest">0</strong>
+        </div>
+      </section>
+
+      <section class="screen{% if not user.is_admin %} is-active{% endif %}" id="screen-streak" aria-labelledby="streakTitle" {% if user.is_admin %}hidden{% endif %}>
+        <div class="workspace">
+          <aside class="side-panel">
+            <div class="panel-head">
+              <h2 id="streakTitle">Singleplayer</h2>
+            </div>
+
+            <label class="field">
+              <span>Name</span>
+              <input id="playerName" type="text" maxlength="18" autocomplete="off" readonly />
+            </label>
+
+            <div class="metrics">
+              <div class="metric">
+                <span>Words</span>
+                <strong id="streakWords">0</strong>
+              </div>
+              <div class="metric">
+                <span>Guesses</span>
+                <strong id="streakGuesses">0/6</strong>
+              </div>
+            </div>
+
+            <button class="primary-action" id="restartStreak" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+                <path d="M20 4v6h-6" />
+              </svg>
+              <span>New Run</span>
+            </button>
+          </aside>
+
+          <section class="play-surface" aria-label="Single game board">
+            <div class="round-head">
+              <div>
+                <span class="eyebrow" id="streakRound">Word 1</span>
+                <h2 id="streakPrompt">Guess the word</h2>
+              </div>
+              <div class="status-pill" id="streakStatus" aria-live="polite">Ready</div>
+            </div>
+            <div class="board" id="streakBoard" aria-label="Single board"></div>
+            <div class="keyboard" id="streakKeyboard" aria-label="Single keyboard"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-multiplayer" aria-labelledby="multiTitle" {% if user.is_admin %}hidden{% endif %}>
+        <div class="workspace">
+          <aside class="side-panel">
+            <div class="panel-head">
+              <span class="eyebrow">3 Rounds</span>
+              <h2 id="multiTitle">Challenge</h2>
+            </div>
+
+            <label class="field">
+              <span>Player 1</span>
+              <input id="playerOneName" type="text" maxlength="18" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Player 2</span>
+              <input id="playerTwoName" type="text" maxlength="18" autocomplete="off" />
+            </label>
+
+            <button class="primary-action" id="startChallenge" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14" />
+                <path d="m13 6 6 6-6 6" />
+              </svg>
+              <span>Start Match</span>
+            </button>
+
+            <div class="match-box" aria-label="Match score">
+              <div>
+                <span id="p1Label">Player 1</span>
+                <strong id="p1Score">0</strong>
+              </div>
+              <div>
+                <span id="p2Label">Player 2</span>
+                <strong id="p2Score">0</strong>
+              </div>
+            </div>
+
+            <ol class="round-log" id="roundLog" aria-label="Round history"></ol>
+          </aside>
+
+          <section class="play-surface" aria-label="Challenge board">
+            <div class="round-head">
+              <div>
+                <span class="eyebrow" id="multiRound">Round 1</span>
+                <h2 id="multiPrompt">Set the players</h2>
+              </div>
+              <div class="status-pill" id="multiStatus" aria-live="polite">Idle</div>
+            </div>
+
+            <div class="board-stage">
+              <div class="board" id="multiBoard" aria-label="Challenge board"></div>
+              <div class="cover is-visible" id="multiCover">
+                <h3 id="coverTitle">Challenge</h3>
+                <p id="coverText">Ready when you are.</p>
+                <button class="primary-action" id="coverAction" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 12h14" />
+                    <path d="m13 6 6 6-6 6" />
+                  </svg>
+                  <span id="coverActionText">Start</span>
+                </button>
+              </div>
+            </div>
+            <div class="keyboard" id="multiKeyboard" aria-label="Challenge keyboard"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-profile" aria-labelledby="playerAccountTitle" {% if user.is_admin %}hidden{% endif %}>
+        <div class="profile-layout">
+          <section class="player-account" aria-labelledby="playerAccountTitle">
+            <div class="panel-head">
+              <span class="eyebrow">Player</span>
+              <h2 id="playerAccountTitle">Account</h2>
+            </div>
+
+            <label class="field">
+              <span>Username</span>
+              <input id="accountUsername" type="text" maxlength="18" autocomplete="username" />
+            </label>
+
+            <button class="primary-action" id="saveUsername" type="button">
+              Save Username
+            </button>
+
+            <div class="profile-stats" aria-label="Player stats">
+              <div class="profile-stat">
+                <span>Highest Streak</span>
+                <strong id="playerBestStreak">0</strong>
+              </div>
+              <div class="profile-stat">
+                <span>Words Guessed</span>
+                <strong id="playerWordsGuessed">0</strong>
+              </div>
+            </div>
+
+            <p class="player-message" id="playerMessage" aria-live="polite"></p>
+          </section>
+
+          <section class="player-account" aria-labelledby="playerPasswordTitle">
+            <div class="panel-head">
+              <span class="eyebrow">Security</span>
+              <h2 id="playerPasswordTitle">Change Password</h2>
+            </div>
+
+            <label class="field">
+              <span>Current Password</span>
+              <input id="currentPassword" type="password" autocomplete="current-password" />
+            </label>
+
+            <label class="field">
+              <span>New Password</span>
+              <input id="profileNewPassword" type="password" autocomplete="new-password" />
+            </label>
+
+            <button class="primary-action" id="saveProfilePassword" type="button">
+              Save Password
+            </button>
+
+            <p class="player-message" id="passwordMessage" aria-live="polite"></p>
+          </section>
+        </div>
+      </section>
+
+      <section class="screen{% if user.is_admin %} is-active{% endif %}" id="screen-leaderboard" aria-labelledby="leaderTitle">
+        <div class="leaderboard-layout">
+          <section class="leader-panel">
+            <div class="panel-head">
+              <span class="eyebrow">Records</span>
+              <h2 id="leaderTitle">Leaderboard</h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Name</th>
+                    <th>Word Guessed</th>
+                  </tr>
+                </thead>
+                <tbody id="streakLeaders"></tbody>
+              </table>
+            </div>
+            <div class="admin-tools" id="adminTools" {% if not user.is_admin %}hidden{% endif %}>
+              <div class="admin-tool">
+                <div class="panel-head">
+                  <span class="eyebrow">Admin</span>
+                  <h2>Change Password</h2>
+                </div>
+                <label class="field">
+                  <span>Player</span>
+                  <select id="passwordPlayer"></select>
+                </label>
+                <label class="field">
+                  <span>New Password</span>
+                  <input id="newPlayerPassword" type="password" autocomplete="new-password" />
+                </label>
+                <button class="primary-action" id="savePlayerPassword" type="button">
+                  Save Password
+                </button>
+              </div>
+
+              <div class="admin-tool">
+                <div class="panel-head">
+                  <span class="eyebrow">Admin</span>
+                  <h2>Delete Player</h2>
+                </div>
+                <label class="field">
+                  <select id="deletePlayerSelect"></select>
+                </label>
+                <button class="danger-action" id="deletePlayerButton" type="button">
+                  Delete Player
+                </button>
+              </div>
+
+              <p class="admin-message" id="adminMessage" aria-live="polite"></p>
+            </div>
+          </section>
+
+        </div>
+      </section>
+    </main>
+
+    <script>
+      window.WORDLE_USER = {{ {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "isAdmin": user.is_admin
+      } | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+  </body>
+</html>

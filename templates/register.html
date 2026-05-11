@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Create Player</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <section class="login-screen" aria-labelledby="registerTitle">
+      <form class="login-panel" method="post" action="{{ url_for('auth.register') }}">
+        <div class="brand login-brand">
+          <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+            <rect x="8" y="8" width="16" height="16" rx="3" />
+            <rect x="28" y="8" width="16" height="16" rx="3" />
+            <rect x="48" y="8" width="8" height="16" rx="3" />
+            <rect x="8" y="28" width="16" height="16" rx="3" />
+            <rect x="28" y="28" width="16" height="16" rx="3" />
+            <rect x="48" y="28" width="8" height="16" rx="3" />
+            <rect x="8" y="48" width="16" height="8" rx="3" />
+            <rect x="28" y="48" width="16" height="8" rx="3" />
+            <rect x="48" y="48" width="8" height="8" rx="3" />
+          </svg>
+          <div>
+            <h1 id="registerTitle">Create Player</h1>
+            <p>Add a new Wordle account.</p>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Username</span>
+          <input name="username" type="text" autocomplete="username" required />
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="new-password" required />
+        </label>
+
+        <button class="primary-action" type="submit">Create Account</button>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <p class="login-message">{{ messages[0] }}</p>
+          {% else %}
+            <p class="login-message"></p>
+          {% endif %}
+        {% endwith %}
+
+        <a class="subtle-link" href="{{ url_for('auth.login') }}">Back to login</a>
+      </form>
+    </section>
+  </body>
+</html>
